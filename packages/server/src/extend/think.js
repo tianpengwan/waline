@@ -1,10 +1,14 @@
-const ip2region = require('dy-node-ip2region');
+// 移除原有 ip2region 依赖（关键：不再需要本地 IP 库）
+// const ip2region = require('dy-node-ip2region');
 const helper = require('think-helper');
 const parser = require('ua-parser-js');
+// 新增：引入 axios 用于调用 API（若用 fetch 可不用）
+const axios = require('axios');
 
 const preventMessage = 'PREVENT_NEXT_PROCESS';
 
-const regionSearch = ip2region.create(process.env.IP2REGION_DB);
+// 移除原有本地 IP 库初始化逻辑
+// const regionSearch = ip2region.create(process.env.IP2REGION_DB);
 
 const OS_VERSION_MAP = {
   Windows: {
@@ -66,24 +70,34 @@ module.exports = {
       }
     });
   },
+  // 核心修改：替换 ip2region 函数为 API 调用逻辑
   async ip2region(ip, { depth = 1 }) {
+    // 空 IP/本地 IP 直接返回空（保持原有逻辑兼容）
     if (!ip || ip.includes(':')) return '';
 
     try {
-      const search = helper.promisify(regionSearch.btreeSearch, regionSearch);
-      const result = await search(ip);
+      // 调用第三方 IP 解析 API（替换为你想使用的接口）
+      // 备选：淘宝 IP 接口 http://ip.taobao.com/outGetIpInfo?ip=${ip}&accessKey=alibaba-inc
+      const response = await axios.get(`http://ip-api.com/json/${ip}?lang=zh-CN`, {
+        timeout: 5000, // 5秒超时，避免阻塞
+      });
 
-      if (!result) {
-        return '';
+      const data = response.data;
+      if (data.status !== 'success') {
+        throw new Error(`IP 解析失败：${data.message}`);
       }
-      const { region } = result;
-      const [, , province, city, isp] = region.split('|');
-      const address = Array.from(new Set([province, city, isp].filter((v) => v)));
 
+      // 解析结果（对应原有逻辑的 province/city/isp）
+      const province = data.regionName || ''; // 省份/地区
+      const city = data.city || '';           // 城市
+      const isp = data.isp || '';             // 运营商
+
+      // 按 depth 拼接结果（保持和原有函数返回格式一致）
+      const address = Array.from(new Set([province, city, isp].filter((v) => v)));
       return address.slice(0, depth).join(' ');
     } catch (err) {
-      console.log(err);
-
+      console.log('IP 解析 API 调用失败：', err);
+      // 降级：返回空字符串（和原有逻辑一致）
       return '';
     }
   },
